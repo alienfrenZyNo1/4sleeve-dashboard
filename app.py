@@ -637,6 +637,7 @@ new Chart(ctx, {
   options: {
     responsive: true,
     maintainAspectRatio: false,
+    animation: false,
     interaction: { intersect: false, mode: 'index' },
     plugins: {
       legend: { display: false },
