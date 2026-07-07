@@ -625,9 +625,9 @@ new Chart(ctx, {
     datasets: [{
       label: 'Equity',
       data: equityData,
-      borderColor: '#5ec8ff',
-      backgroundColor: 'rgba(94, 200, 255, 0.16)',
-      borderWidth: isSmallScreen ? 2 : 2.4,
+      borderColor: '#7ddcff',
+      backgroundColor: 'rgba(94, 200, 255, 0.22)',
+      borderWidth: isSmallScreen ? 2.4 : 3.4,
       fill: true,
       tension: 0.32,
       pointRadius: 0,
