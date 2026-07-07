@@ -72,37 +72,52 @@ def generate_backtest_equity(total_ret, n_days):
 
 def process_live_data(paper):
     daily = paper.get("daily_pnl", [])
-    labels = [d.get("date", f"Day {i}") for i, d in enumerate(daily)]
+    labels = [d.get("date", f"Point {i}") for i, d in enumerate(daily)]
     equity_values = [d.get("equity", 0) for d in daily]
-    initial = paper.get("initial_capital", 10000)
-    current_equity = equity_values[-1] if equity_values else initial
+    initial = paper.get("initial_capital", 2000.0)
+    current_equity = paper.get("current_equity") or (equity_values[-1] if equity_values else initial)
+    peak_equity = paper.get("peak_equity") or max([initial, *equity_values]) if equity_values else initial
 
-    peak = initial
-    max_dd = 0
-    for eq in equity_values:
-        if eq > peak:
-            peak = eq
-        dd = (eq - peak) / peak if peak > 0 else 0
-        if dd < max_dd:
-            max_dd = dd
+    max_dd_frac = abs(paper.get("max_drawdown_pct", 0) or 0) / 100
+    if not max_dd_frac:
+        peak = initial
+        max_dd = 0
+        for eq in equity_values:
+            if eq > peak:
+                peak = eq
+            dd = (eq - peak) / peak if peak > 0 else 0
+            if dd < max_dd:
+                max_dd = dd
+        max_dd_frac = abs(max_dd)
 
-    sleeve_pnl = {s: 0 for s in SLEEVE_NAMES}
-    for d in daily:
-        for s in SLEEVE_NAMES:
-            sleeve_pnl[s] += d.get("pnl_by_sleeve", {}).get(s, 0)
+    sleeve_pnl = paper.get("sleeve_allocation") or {s: 0 for s in SLEEVE_NAMES}
+
+    net_pnl = paper.get("net_pnl")
+    if net_pnl is None:
+        net_pnl = current_equity - initial
+    net_pnl_pct = paper.get("net_pnl_pct")
+    if net_pnl_pct is None:
+        net_pnl_pct = (current_equity / initial - 1) if initial else 0
 
     return {
         "labels": labels,
-        "equity": equity_values,
+        "equity": equity_values or [initial],
         "initial_capital": initial,
         "current_equity": current_equity,
-        "current_dd": max_dd,
-        "max_dd": max_dd,
+        "peak_equity": peak_equity,
+        "net_pnl": net_pnl,
+        "net_pnl_pct": net_pnl_pct,
+        "current_dd": -max_dd_frac,
+        "max_dd": max_dd_frac,
         "sleeve_pnl": sleeve_pnl,
         "positions": paper.get("positions", []),
         "ann_return": paper.get("ann_return"),
         "sharpe": paper.get("sharpe"),
         "walk_forward": [],
+        "last_updated": paper.get("updated_at"),
+        "last_processed_at": paper.get("last_processed_at"),
+        "paper_status": paper.get("status", "RUNNING"),
+        "circuit_breaker": paper.get("circuit_breaker", {}),
     }
 
 
@@ -171,6 +186,20 @@ def fmt_num(v, decimals=2):
     if v is None:
         return "—"
     return f"{v:.{decimals}f}"
+
+
+def fmt_money(v):
+    if v is None:
+        return "—"
+    sign = "-" if v < 0 else ""
+    return f"{sign}${abs(v):,.2f}"
+
+
+def fmt_signed_money(v):
+    if v is None:
+        return "—"
+    sign = "+" if v >= 0 else "-"
+    return f"{sign}${abs(v):,.2f}"
 
 
 # ---------------------------------------------------------------------------
@@ -543,8 +572,8 @@ PAGE_TEMPLATE = Template(
       </div>
       <div class="hero-side" aria-label="Current safety and data source">
         <div class="status-row">
-          <span class="status-pill"><span class="status-dot dot-$dd_color"></span>$dd_label</span>
-          <span class="status-pill"><span class="status-dot dot-$source_color"></span>$source</span>
+          <span class="status-pill"><span id="dd-dot" class="status-dot dot-$dd_color"></span><span id="dd-label">$dd_label</span></span>
+          <span class="status-pill"><span id="source-dot" class="status-dot dot-$source_color"></span><span id="source-label">$source</span></span>
         </div>
         <div class="banner-row">
           <span class="banner banner-paper">⚠ Paper only — no live capital</span>
@@ -556,21 +585,24 @@ PAGE_TEMPLATE = Template(
 
   <section class="metric-grid" aria-label="Portfolio metrics">
     <article class="metric-card">
-      <div class="metric-label">Annualized return</div>
-      <div class="metric-value">$ann_return_str</div>
+      <div id="metric1-label" class="metric-label">$metric1_label</div>
+      <div id="metric1-value" class="metric-value">$metric1_value</div>
+      <div id="metric1-sub" class="metric-sub">$metric1_sub</div>
     </article>
     <article class="metric-card">
-      <div class="metric-label">Sharpe ratio</div>
-      <div class="metric-value">$sharpe_str</div>
+      <div id="metric2-label" class="metric-label">$metric2_label</div>
+      <div id="metric2-value" class="metric-value $metric2_class">$metric2_value</div>
+      <div id="metric2-sub" class="metric-sub">$metric2_sub</div>
     </article>
     <article class="metric-card">
-      <div class="metric-label">Max drawdown</div>
-      <div class="metric-value danger">$maxdd_str</div>
+      <div id="metric3-label" class="metric-label">$metric3_label</div>
+      <div id="metric3-value" class="metric-value danger">$metric3_value</div>
+      <div id="metric3-sub" class="metric-sub">$metric3_sub</div>
     </article>
     <article class="metric-card">
-      <div class="metric-label">Current equity</div>
-      <div class="metric-value">$equity_str</div>
-      <div class="metric-sub">from $initial_str</div>
+      <div id="metric4-label" class="metric-label">$metric4_label</div>
+      <div id="metric4-value" class="metric-value">$metric4_value</div>
+      <div id="metric4-sub" class="metric-sub">$metric4_sub</div>
     </article>
   </section>
 
@@ -578,7 +610,7 @@ PAGE_TEMPLATE = Template(
     <div class="panel-header">
       <div>
         <h2 class="panel-title">Equity Curve</h2>
-        <p class="panel-note">$equity_note</p>
+        <p id="equity-note" class="panel-note">$equity_note</p>
       </div>
     </div>
     <div class="chart-shell"><canvas id="equityChart"></canvas></div>
@@ -592,7 +624,7 @@ PAGE_TEMPLATE = Template(
           <p class="panel-note">Frozen sleeve weights or accumulated paper P&amp;L, depending on data source.</p>
         </div>
       </div>
-      <div class="sleeve-stack">$sleeve_bars_html</div>
+      <div id="sleeve-stack" class="sleeve-stack">$sleeve_bars_html</div>
     </article>
     <article class="panel">
       <div class="panel-header">
@@ -601,7 +633,7 @@ PAGE_TEMPLATE = Template(
           <p class="panel-note">Read-only state. This page cannot place orders.</p>
         </div>
       </div>
-      $positions_html
+      <div id="positions-panel">$positions_html</div>
     </article>
   </section>
 
@@ -609,7 +641,7 @@ PAGE_TEMPLATE = Template(
 
   <footer class="footer">
     <strong>READ-ONLY DISPLAY · NO TRADING · NO ORDERS · RESEARCH ONLY</strong><br>
-    Data: $source · Generated $generated_at
+    Data: <span id="footer-source">$source</span> · Generated <span id="footer-generated">$generated_at</span>
   </footer>
 </div>
 
@@ -618,7 +650,38 @@ const labels = $chart_labels;
 const equityData = $chart_data;
 const isSmallScreen = window.matchMedia('(max-width: 720px)').matches;
 const ctx = document.getElementById('equityChart').getContext('2d');
-new Chart(ctx, {
+const moneyFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const pctFmt = new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+function fmtMoney(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return moneyFmt.format(Number(value));
+}
+function fmtSignedMoney(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  const n = Number(value);
+  return (n >= 0 ? '+' : '-') + moneyFmt.format(Math.abs(n));
+}
+function fmtPct(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return pctFmt.format(Number(value));
+}
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+function setMetric(id, label, value, sub) {
+  setText('metric' + id + '-label', label);
+  setText('metric' + id + '-value', value);
+  setText('metric' + id + '-sub', sub || '');
+}
+function setDot(id, color) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'status-dot dot-' + color;
+}
+
+const equityChart = new Chart(ctx, {
   type: 'line',
   data: {
     labels,
@@ -665,6 +728,42 @@ new Chart(ctx, {
     }
   }
 });
+
+function applyLiveData(data) {
+  if (!data || !data.is_live) return;
+  equityChart.data.labels = data.labels || [];
+  equityChart.data.datasets[0].data = data.equity || [];
+  equityChart.update('none');
+
+  setMetric(1, 'Paper equity', fmtMoney(data.current_equity), 'started from ' + fmtMoney(data.initial_capital));
+  setMetric(2, 'Paper P&L', fmtSignedMoney(data.net_pnl), fmtPct(data.net_pnl_pct));
+  setMetric(3, 'Max drawdown', fmtPct(data.max_dd), 'paper canary');
+  setMetric(4, 'Status', data.paper_status || 'RUNNING', 'updated ' + (data.last_updated || '—'));
+  setText('equity-note', 'Live $$2,000 paper equity. Auto-refreshes every 15 seconds; equity changes only when the paper runner processes a new candle.');
+  setText('source-label', data.source || 'LIVE PAPER RUNNER');
+  setText('footer-source', data.source || 'LIVE PAPER RUNNER');
+  setText('footer-generated', data.last_updated || new Date().toISOString());
+  setDot('source-dot', 'green');
+
+  const dd = Math.abs(Number(data.max_dd || 0));
+  const ddColor = dd < 0.10 ? 'green' : (dd < 0.20 ? 'yellow' : 'red');
+  setDot('dd-dot', ddColor);
+  setText('dd-label', dd < 0.10 ? 'NOMINAL' : (dd < 0.20 ? 'ELEVATED DD' : 'CRITICAL DD'));
+}
+
+async function refreshPaperData() {
+  try {
+    const response = await fetch('/api/data?ts=' + Date.now(), { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json();
+    applyLiveData(data);
+  } catch (err) {
+    console.warn('paper dashboard refresh failed', err);
+  }
+}
+
+setInterval(refreshPaperData, 15000);
+refreshPaperData();
 </script>
 </body>
 </html>'''
@@ -719,13 +818,16 @@ def dashboard():
         for p in positions:
             pnl = p.get("pnl", 0)
             cls = "pos" if pnl >= 0 else "neg"
+            size = p.get("size", "")
+            size_display = fmt_money(size) if isinstance(size, (int, float)) else str(size)
+            pnl_display = fmt_signed_money(pnl) if isinstance(pnl, (int, float)) else str(pnl)
             pos_rows.append(
                 "<tr>"
                 f"<td data-label='Symbol' class='config-cell'>{escape(str(p.get('symbol', '')))}</td>"
                 f"<td data-label='Sleeve'>{escape(str(p.get('sleeve', '')))}</td>"
                 f"<td data-label='Side'>{escape(str(p.get('side', '')))}</td>"
-                f"<td data-label='Size' class='num'>{escape(str(p.get('size', '')))}</td>"
-                f"<td data-label='PnL' class='num {cls}'>{pnl:.2f}</td>"
+                f"<td data-label='Size' class='num'>{escape(size_display)}</td>"
+                f"<td data-label='PnL' class='num {cls}'>{escape(pnl_display)}</td>"
                 "</tr>"
             )
         positions_html = (
@@ -773,19 +875,58 @@ def dashboard():
     else:
         walk_forward_html = ""
 
-    equity_note = "Live paper equity from the canary runner." if is_live else "Illustrative curve generated from the bundled backtest summary."
-    decimals = 2 if is_live else 4
+    if is_live:
+        net_pnl = processed.get("net_pnl", 0)
+        metric1_label = "Paper equity"
+        metric1_value = fmt_money(processed.get("current_equity"))
+        metric1_sub = f"started from {fmt_money(processed.get('initial_capital'))}"
+        metric2_label = "Paper P&L"
+        metric2_value = fmt_signed_money(net_pnl)
+        metric2_sub = fmt_pct(processed.get("net_pnl_pct"))
+        metric2_class = "pos" if net_pnl >= 0 else "neg"
+        metric3_label = "Max drawdown"
+        metric3_value = fmt_pct(processed.get("max_dd"))
+        metric3_sub = "paper canary"
+        metric4_label = "Status"
+        metric4_value = processed.get("paper_status", "RUNNING")
+        metric4_sub = f"updated {processed.get('last_updated') or '—'}"
+        equity_note = "Live $2,000 paper equity. Auto-refreshes every 15 seconds; equity changes only when the paper runner processes a new candle."
+        decimals = 2
+    else:
+        metric1_label = "Annualized return"
+        metric1_value = fmt_pct(processed.get("ann_return"))
+        metric1_sub = "backtest fallback"
+        metric2_label = "Sharpe ratio"
+        metric2_value = fmt_num(processed.get("sharpe"))
+        metric2_sub = "backtest fallback"
+        metric2_class = ""
+        metric3_label = "Max drawdown"
+        metric3_value = fmt_pct(processed.get("max_dd"))
+        metric3_sub = "backtest fallback"
+        metric4_label = "Current equity"
+        metric4_value = fmt_num(processed.get("current_equity"), 4)
+        metric4_sub = f"from {fmt_num(processed.get('initial_capital'), 4)}"
+        equity_note = "Illustrative curve generated from the bundled backtest summary."
+        decimals = 4
 
     rendered = PAGE_TEMPLATE.substitute(
         source=source,
         source_color=source_color,
         dd_color=dd_color,
         dd_label=dd_label,
-        ann_return_str=fmt_pct(processed.get("ann_return")),
-        sharpe_str=fmt_num(processed.get("sharpe")),
-        maxdd_str=fmt_pct(processed.get("max_dd")),
-        equity_str=fmt_num(processed.get("current_equity"), decimals),
-        initial_str=fmt_num(processed.get("initial_capital"), decimals),
+        metric1_label=metric1_label,
+        metric1_value=metric1_value,
+        metric1_sub=metric1_sub,
+        metric2_label=metric2_label,
+        metric2_value=metric2_value,
+        metric2_sub=metric2_sub,
+        metric2_class=metric2_class,
+        metric3_label=metric3_label,
+        metric3_value=metric3_value,
+        metric3_sub=metric3_sub,
+        metric4_label=metric4_label,
+        metric4_value=metric4_value,
+        metric4_sub=metric4_sub,
         chart_labels=json.dumps(processed.get("labels", [])),
         chart_data=json.dumps(processed.get("equity", [])),
         equity_note=equity_note,
