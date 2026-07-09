@@ -90,4 +90,12 @@ with tempfile.TemporaryDirectory() as tmp:
     assert "function showPaperView" in html
     assert "localStorage.setItem('paperView'" in html
 
+    # Auto-refresh must update the visible card/table panels, not only metrics/charts.
+    assert "function renderModelTrades" in html
+    assert "function renderExecutionPositions" in html
+    assert "function renderExecutionFills" in html
+    assert "positions-panel').innerHTML" in html
+    assert "execution-positions-panel').innerHTML" in html
+    assert "execution-fills-panel').innerHTML" in html
+
 print("dual paper view check passed")

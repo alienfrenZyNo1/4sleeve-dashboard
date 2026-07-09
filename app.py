@@ -781,6 +781,77 @@ function setDot(id, color) {
   if (!el) return;
   el.className = 'status-dot dot-' + color;
 }
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+function fmtNum(value, digits = 6) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return Number(value).toFixed(digits);
+}
+function tableHtml(headers, rows, emptyMessage) {
+  if (!rows || rows.length === 0) {
+    return '<div class="no-data"><div><strong>' + escapeHtml(emptyMessage) + '</strong></div></div>';
+  }
+  const head = headers.map(h => '<th' + (h.num ? ' class="num"' : '') + '>' + escapeHtml(h.label) + '</th>').join('');
+  const body = rows.map(row => '<tr>' + headers.map(h => '<td data-label="' + escapeHtml(h.label) + '" class="' + (h.num ? 'num ' : '') + escapeHtml(row[h.key + '_class'] || '') + '">' + escapeHtml(row[h.key] ?? '') + '</td>').join('') + '</tr>').join('');
+  return '<div class="table-wrap"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+}
+function renderModelTrades(data) {
+  const rows = (data.positions || []).map(p => {
+    const pnl = Number(p.pnl || 0);
+    return {
+      symbol: p.symbol || '',
+      symbol_class: 'config-cell',
+      sleeve: p.sleeve || '',
+      side: p.side || '',
+      size: typeof p.size === 'number' ? fmtMoney(p.size) : (p.size || ''),
+      pnl: typeof p.pnl === 'number' ? fmtSignedMoney(p.pnl) : (p.pnl || ''),
+      pnl_class: pnl >= 0 ? 'pos' : 'neg',
+    };
+  });
+  document.getElementById('positions-panel').innerHTML = tableHtml([
+    {key:'symbol', label:'Symbol'}, {key:'sleeve', label:'Sleeve'}, {key:'side', label:'Side'},
+    {key:'size', label:'Size', num:true}, {key:'pnl', label:'PnL', num:true},
+  ], rows, 'No live model-paper trades.');
+}
+function renderExecutionPositions(executionPaper) {
+  const rows = (executionPaper.positions || []).map(p => {
+    const upnl = Number(p.unrealized_pnl || 0);
+    return {
+      symbol: p.symbol || '',
+      symbol_class: 'config-cell',
+      side: p.side || '',
+      quantity: fmtNum(p.quantity, 6),
+      avg_entry_price: fmtNum(p.avg_entry_price, 6),
+      mark_price: fmtNum(p.mark_price, 6),
+      notional: fmtMoney(p.notional),
+      unrealized_pnl: fmtSignedMoney(upnl),
+      unrealized_pnl_class: upnl >= 0 ? 'pos' : 'neg',
+    };
+  });
+  document.getElementById('execution-positions-panel').innerHTML = tableHtml([
+    {key:'symbol', label:'Symbol'}, {key:'side', label:'Side'}, {key:'quantity', label:'Qty', num:true},
+    {key:'avg_entry_price', label:'Entry', num:true}, {key:'mark_price', label:'Mark', num:true},
+    {key:'notional', label:'Notional', num:true}, {key:'unrealized_pnl', label:'UPnL', num:true},
+  ], rows, 'No simulated execution positions.');
+}
+function renderExecutionFills(executionPaper) {
+  const rows = (executionPaper.ledger || []).slice(-20).map(f => ({
+    symbol: f.symbol || '',
+    symbol_class: 'config-cell',
+    side: f.side || '',
+    quantity: fmtNum(f.quantity, 6),
+    fill_price: fmtNum(f.fill_price, 6),
+    notional: fmtMoney(f.notional),
+    fee: fmtMoney(f.fee),
+    reason: f.reason || '',
+  }));
+  document.getElementById('execution-fills-panel').innerHTML = tableHtml([
+    {key:'symbol', label:'Symbol'}, {key:'side', label:'Side'}, {key:'quantity', label:'Qty', num:true},
+    {key:'fill_price', label:'Fill', num:true}, {key:'notional', label:'Notional', num:true},
+    {key:'fee', label:'Fee', num:true}, {key:'reason', label:'Reason'},
+  ], rows, 'No simulated fills yet.');
+}
 
 function makeEquityChart(canvasId, labels, data, color, fill) {
   const canvas = document.getElementById(canvasId);
@@ -863,6 +934,11 @@ function applyLiveData(data) {
     executionEquityChart.data.datasets[0].data = data.execution_equity || ep.equity_curve || [data.initial_capital, ep.equity].filter(v => v !== undefined && v !== null);
     executionEquityChart.update('none');
   }
+
+  const ep = data.execution_paper || {};
+  renderModelTrades(data);
+  renderExecutionPositions(ep);
+  renderExecutionFills(ep);
 
   setMetric(1, 'Paper equity', fmtMoney(data.current_equity), 'started from ' + fmtMoney(data.initial_capital));
   setMetric(2, 'Paper P&L', fmtSignedMoney(data.net_pnl), fmtPct(data.net_pnl_pct));
@@ -1016,11 +1092,11 @@ def dashboard():
                 "</tr>"
             )
         exec_positions_table = (
-            '<div class="table-wrap"><table><thead><tr>'
+            '<div id="execution-positions-panel"><div class="table-wrap"><table><thead><tr>'
             '<th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Mark</th><th class="num">Notional</th><th class="num">UPnL</th>'
-            '</tr></thead><tbody>' + "".join(exec_pos_rows) + '</tbody></table></div>'
+            '</tr></thead><tbody>' + "".join(exec_pos_rows) + '</tbody></table></div></div>'
             if exec_pos_rows
-            else '<div class="no-data"><div><strong>No simulated execution positions.</strong></div></div>'
+            else '<div id="execution-positions-panel"><div class="no-data"><div><strong>No simulated execution positions.</strong></div></div></div>'
         )
 
         exec_fill_rows = []
@@ -1038,11 +1114,11 @@ def dashboard():
             )
         exec_ledger_table = (
             '<h3 class="panel-title" style="font-size:1rem;margin-top:20px">Recent simulated fills</h3>'
-            '<div class="table-wrap"><table><thead><tr>'
+            '<div id="execution-fills-panel"><div class="table-wrap"><table><thead><tr>'
             '<th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Fill</th><th class="num">Notional</th><th class="num">Fee</th><th>Reason</th>'
-            '</tr></thead><tbody>' + "".join(exec_fill_rows) + '</tbody></table></div>'
+            '</tr></thead><tbody>' + "".join(exec_fill_rows) + '</tbody></table></div></div>'
             if exec_fill_rows
-            else ""
+            else '<h3 class="panel-title" style="font-size:1rem;margin-top:20px">Recent simulated fills</h3><div id="execution-fills-panel"><div class="no-data"><div><strong>No simulated fills yet.</strong></div></div></div>'
         )
         limitations = execution_paper.get("limitations") or []
         limit_html = "".join(f"<li>{escape(str(item))}</li>" for item in limitations[:4])
