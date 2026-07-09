@@ -88,6 +88,9 @@ def process_live_data(paper):
         mirrored.setdefault("max_dd", 0)
         mirrored.setdefault("sleeve_pnl", {s: 0 for s in SLEEVE_NAMES})
         mirrored.setdefault("positions", [])
+        execution = mirrored.get("execution_paper") or {}
+        mirrored.setdefault("execution_labels", execution.get("labels") or mirrored.get("labels", []))
+        mirrored.setdefault("execution_equity", execution.get("equity_curve") or ([mirrored["initial_capital"], execution.get("equity")] if execution.get("equity") is not None else [mirrored["initial_capital"]]))
         mirrored.setdefault("walk_forward", [])
         mirrored.setdefault("paper_status", "RUNNING")
         return mirrored
@@ -133,6 +136,11 @@ def process_live_data(paper):
         "sleeve_pnl": sleeve_pnl,
         "positions": paper.get("positions", []),
         "execution_paper": paper.get("execution_paper", {"enabled": False}),
+        "execution_labels": (paper.get("execution_paper") or {}).get("labels")
+        or labels,
+        "execution_equity": (paper.get("execution_paper") or {}).get("equity_curve")
+        or [d.get("execution_equity") for d in daily if d.get("execution_equity") is not None]
+        or ([initial, (paper.get("execution_paper") or {}).get("equity")] if (paper.get("execution_paper") or {}).get("equity") is not None else [initial]),
         "ann_return": paper.get("ann_return"),
         "sharpe": paper.get("sharpe"),
         "walk_forward": [],
@@ -392,6 +400,45 @@ PAGE_TEMPLATE = Template(
   .banner-paper { color: #ffd7dd; border-color: rgba(255, 94, 112, 0.35); background: rgba(255, 94, 112, 0.11); }
   .banner-canary { color: #ffe9a8; border-color: rgba(245, 196, 81, 0.34); background: rgba(245, 196, 81, 0.10); }
 
+  .view-switcher {
+    position: sticky;
+    top: max(10px, env(safe-area-inset-top));
+    z-index: 20;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0 0 16px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(8, 11, 19, 0.82);
+    box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,0.08);
+    backdrop-filter: blur(18px);
+  }
+  .view-button {
+    min-height: 48px;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.055);
+    color: var(--muted);
+    font: inherit;
+    font-weight: 900;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    letter-spacing: 0.01em;
+  }
+  .view-button[aria-pressed="true"] {
+    background: linear-gradient(135deg, rgba(94,200,255,0.28), rgba(143,122,255,0.24));
+    color: #fff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 0 24px rgba(94,200,255,0.16);
+  }
+  .view-icon { font-size: 1.1rem; line-height: 1; }
+  .paper-view { display: none; }
+  .paper-view.active { display: block; }
+
   .metric-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -447,7 +494,7 @@ PAGE_TEMPLATE = Template(
   .panel-title { margin: 0; color: #ffffff; font-size: clamp(1rem, 2vw, 1.15rem); letter-spacing: -0.02em; }
   .panel-note { margin: 4px 0 0; color: var(--faint); font-size: 0.82rem; line-height: 1.35; }
   .chart-shell { position: relative; height: clamp(280px, 44vh, 430px); width: 100%; }
-  #equityChart { width: 100% !important; height: 100% !important; }
+  #modelEquityChart, #executionEquityChart { width: 100% !important; height: 100% !important; }
 
   .two-col {
     display: grid;
@@ -605,71 +652,92 @@ PAGE_TEMPLATE = Template(
     </div>
   </header>
 
-  <section class="metric-grid" aria-label="Portfolio metrics">
-    <article class="metric-card">
-      <div id="metric1-label" class="metric-label">$metric1_label</div>
-      <div id="metric1-value" class="metric-value">$metric1_value</div>
-      <div id="metric1-sub" class="metric-sub">$metric1_sub</div>
-    </article>
-    <article class="metric-card">
-      <div id="metric2-label" class="metric-label">$metric2_label</div>
-      <div id="metric2-value" class="metric-value $metric2_class">$metric2_value</div>
-      <div id="metric2-sub" class="metric-sub">$metric2_sub</div>
-    </article>
-    <article class="metric-card">
-      <div id="metric3-label" class="metric-label">$metric3_label</div>
-      <div id="metric3-value" class="metric-value danger">$metric3_value</div>
-      <div id="metric3-sub" class="metric-sub">$metric3_sub</div>
-    </article>
-    <article class="metric-card">
-      <div id="metric4-label" class="metric-label">$metric4_label</div>
-      <div id="metric4-value" class="metric-value">$metric4_value</div>
-      <div id="metric4-sub" class="metric-sub">$metric4_sub</div>
-    </article>
-  </section>
+  <nav class="view-switcher" aria-label="Paper dashboard views">
+    <button type="button" class="view-button" data-view="model" aria-controls="model-paper-view" aria-pressed="true"><span class="view-icon">📈</span><span>Model Paper</span></button>
+    <button type="button" class="view-button" data-view="execution" aria-controls="execution-paper-view" aria-pressed="false"><span class="view-icon">⚙</span><span>Execution Paper</span></button>
+  </nav>
 
-  <section class="panel" aria-label="Equity curve">
-    <div class="panel-header">
-      <div>
-        <h2 class="panel-title">Equity Curve</h2>
-        <p id="equity-note" class="panel-note">$equity_note</p>
-      </div>
-    </div>
-    <div class="chart-shell"><canvas id="equityChart"></canvas></div>
-  </section>
+  <main id="model-paper-view" class="paper-view active" aria-label="Model paper page">
+    <section class="metric-grid" aria-label="Model paper metrics">
+      <article class="metric-card">
+        <div id="metric1-label" class="metric-label">$metric1_label</div>
+        <div id="metric1-value" class="metric-value">$metric1_value</div>
+        <div id="metric1-sub" class="metric-sub">$metric1_sub</div>
+      </article>
+      <article class="metric-card">
+        <div id="metric2-label" class="metric-label">$metric2_label</div>
+        <div id="metric2-value" class="metric-value $metric2_class">$metric2_value</div>
+        <div id="metric2-sub" class="metric-sub">$metric2_sub</div>
+      </article>
+      <article class="metric-card">
+        <div id="metric3-label" class="metric-label">$metric3_label</div>
+        <div id="metric3-value" class="metric-value danger">$metric3_value</div>
+        <div id="metric3-sub" class="metric-sub">$metric3_sub</div>
+      </article>
+      <article class="metric-card">
+        <div id="metric4-label" class="metric-label">$metric4_label</div>
+        <div id="metric4-value" class="metric-value">$metric4_value</div>
+        <div id="metric4-sub" class="metric-sub">$metric4_sub</div>
+      </article>
+    </section>
 
-  <section class="two-col">
-    <article class="panel">
+    <section class="panel" aria-label="Model paper equity curve">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">Sleeve Allocation / P&amp;L</h2>
-          <p class="panel-note">Frozen sleeve weights or accumulated paper P&amp;L, depending on data source.</p>
+          <h2 class="panel-title">Model Paper Equity Curve</h2>
+          <p id="equity-note" class="panel-note">$equity_note</p>
         </div>
       </div>
-      <div id="sleeve-stack" class="sleeve-stack">$sleeve_bars_html</div>
-    </article>
-    <article class="panel">
+      <div class="chart-shell"><canvas id="modelEquityChart"></canvas></div>
+    </section>
+
+    <section class="two-col">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Sleeve Allocation / P&amp;L</h2>
+            <p class="panel-note">Frozen sleeve weights or accumulated paper P&amp;L, depending on data source.</p>
+          </div>
+        </div>
+        <div id="sleeve-stack" class="sleeve-stack">$sleeve_bars_html</div>
+      </article>
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Model paper trades</h2>
+            <p class="panel-note">Model-paper trade/position state. Read-only; this page cannot place orders.</p>
+          </div>
+        </div>
+        <div id="positions-panel">$positions_html</div>
+      </article>
+    </section>
+
+    $walk_forward_html
+  </main>
+
+  <main id="execution-paper-view" class="paper-view" aria-label="Execution paper page">
+    <section class="metric-grid" aria-label="Execution paper metrics">$execution_metric_cards_html</section>
+
+    <section class="panel" aria-label="Execution paper equity curve">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">Current Positions</h2>
-          <p class="panel-note">Read-only state. This page cannot place orders.</p>
+          <h2 class="panel-title">Execution equity curve</h2>
+          <p class="panel-note">Execution-paper account value after simulated fills, fees, slippage, and mark-to-market.</p>
         </div>
       </div>
-      <div id="positions-panel">$positions_html</div>
-    </article>
-  </section>
+      <div class="chart-shell"><canvas id="executionEquityChart"></canvas></div>
+    </section>
 
-  <section class="panel" aria-label="Execution paper account">
-    <div class="panel-header">
-      <div>
-        <h2 class="panel-title">Execution Paper Account</h2>
-        <p class="panel-note">Simulated exchange-style fills, fees, slippage, positions, and cash ledger. Still paper-only — no live orders.</p>
+    <section class="panel" aria-label="Execution paper account">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">Execution Paper Account</h2>
+          <p class="panel-note">Simulated exchange-style fills, fees, slippage, positions, and cash ledger. Still paper-only — no live orders.</p>
+        </div>
       </div>
-    </div>
-    <div id="execution-paper-panel">$execution_paper_html</div>
-  </section>
-
-  $walk_forward_html
+      <div id="execution-paper-panel">$execution_paper_html</div>
+    </section>
+  </main>
 
   <footer class="footer">
     <strong>READ-ONLY DISPLAY · NO TRADING · NO ORDERS · RESEARCH ONLY</strong><br>
@@ -678,10 +746,11 @@ PAGE_TEMPLATE = Template(
 </div>
 
 <script>
-const labels = $chart_labels;
-const equityData = $chart_data;
+const modelLabels = $chart_labels;
+const modelEquityData = $chart_data;
+const executionLabels = $execution_chart_labels;
+const executionEquityData = $execution_chart_data;
 const isSmallScreen = window.matchMedia('(max-width: 720px)').matches;
-const ctx = document.getElementById('equityChart').getContext('2d');
 const moneyFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 const pctFmt = new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
@@ -713,59 +782,87 @@ function setDot(id, color) {
   el.className = 'status-dot dot-' + color;
 }
 
-const equityChart = new Chart(ctx, {
-  type: 'line',
-  data: {
-    labels,
-    datasets: [{
-      label: 'Equity',
-      data: equityData,
-      borderColor: '#7ddcff',
-      backgroundColor: 'rgba(94, 200, 255, 0.22)',
-      borderWidth: isSmallScreen ? 2.4 : 3.4,
-      fill: true,
-      tension: 0.32,
-      pointRadius: 0,
-      pointHoverRadius: 4,
-    }]
-  },
-  options: {
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: false,
-    interaction: { intersect: false, mode: 'index' },
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        backgroundColor: 'rgba(14, 18, 29, 0.98)',
-        borderColor: 'rgba(255,255,255,0.14)',
-        borderWidth: 1,
-        titleColor: '#ffffff',
-        bodyColor: '#dfe8f8',
-        displayColors: false,
-        padding: 12,
-      }
+function makeEquityChart(canvasId, labels, data, color, fill) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  return new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Equity',
+        data,
+        borderColor: color,
+        backgroundColor: fill,
+        borderWidth: isSmallScreen ? 2.4 : 3.4,
+        fill: true,
+        tension: 0.32,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+      }]
     },
-    scales: {
-      x: {
-        ticks: { color: '#657089', maxTicksLimit: isSmallScreen ? 5 : 9, maxRotation: 0 },
-        grid: { color: 'rgba(255,255,255,0.045)' },
-        border: { color: 'rgba(255,255,255,0.08)' }
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { intersect: false, mode: 'index' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(14, 18, 29, 0.98)',
+          borderColor: 'rgba(255,255,255,0.14)',
+          borderWidth: 1,
+          titleColor: '#ffffff',
+          bodyColor: '#dfe8f8',
+          displayColors: false,
+          padding: 12,
+        }
       },
-      y: {
-        ticks: { color: '#657089', maxTicksLimit: isSmallScreen ? 5 : 7 },
-        grid: { color: 'rgba(255,255,255,0.045)' },
-        border: { color: 'rgba(255,255,255,0.08)' }
+      scales: {
+        x: {
+          ticks: { color: '#657089', maxTicksLimit: isSmallScreen ? 5 : 9, maxRotation: 0 },
+          grid: { color: 'rgba(255,255,255,0.045)' },
+          border: { color: 'rgba(255,255,255,0.08)' }
+        },
+        y: {
+          ticks: { color: '#657089', maxTicksLimit: isSmallScreen ? 5 : 7 },
+          grid: { color: 'rgba(255,255,255,0.045)' },
+          border: { color: 'rgba(255,255,255,0.08)' }
+        }
       }
     }
-  }
-});
+  });
+}
+
+const modelEquityChart = makeEquityChart('modelEquityChart', modelLabels, modelEquityData, '#7ddcff', 'rgba(94, 200, 255, 0.22)');
+const executionEquityChart = makeEquityChart('executionEquityChart', executionLabels, executionEquityData, '#39d98a', 'rgba(57, 217, 138, 0.18)');
+
+function showPaperView(view) {
+  const selected = view === 'execution' ? 'execution' : 'model';
+  document.querySelectorAll('.paper-view').forEach(el => el.classList.toggle('active', el.id === selected + '-paper-view'));
+  document.querySelectorAll('.view-button').forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.view === selected)));
+  localStorage.setItem('paperView', selected);
+  setTimeout(() => {
+    if (modelEquityChart) modelEquityChart.resize();
+    if (executionEquityChart) executionEquityChart.resize();
+  }, 0);
+}
+document.querySelectorAll('.view-button').forEach(btn => btn.addEventListener('click', () => showPaperView(btn.dataset.view)));
+showPaperView(localStorage.getItem('paperView') || 'model');
 
 function applyLiveData(data) {
   if (!data || !data.is_live) return;
-  equityChart.data.labels = data.labels || [];
-  equityChart.data.datasets[0].data = data.equity || [];
-  equityChart.update('none');
+  if (modelEquityChart) {
+    modelEquityChart.data.labels = data.labels || [];
+    modelEquityChart.data.datasets[0].data = data.equity || [];
+    modelEquityChart.update('none');
+  }
+  if (executionEquityChart) {
+    const ep = data.execution_paper || {};
+    executionEquityChart.data.labels = data.execution_labels || ep.labels || data.labels || [];
+    executionEquityChart.data.datasets[0].data = data.execution_equity || ep.equity_curve || [data.initial_capital, ep.equity].filter(v => v !== undefined && v !== null);
+    executionEquityChart.update('none');
+  }
 
   setMetric(1, 'Paper equity', fmtMoney(data.current_equity), 'started from ' + fmtMoney(data.initial_capital));
   setMetric(2, 'Paper P&L', fmtSignedMoney(data.net_pnl), fmtPct(data.net_pnl_pct));
@@ -955,6 +1052,31 @@ def dashboard():
     else:
         execution_paper_html = '<div class="no-data"><div><strong>Execution paper not enabled yet.</strong><br>The API is live, but no execution-paper account payload is available.</div></div>'
 
+    exec_net = execution_paper.get("net_pnl", 0) if execution_paper.get("enabled") else 0
+    exec_cls = "pos" if isinstance(exec_net, (int, float)) and exec_net >= 0 else "neg"
+    execution_metric_cards_html = (
+        '<article class="metric-card">'
+        '<div class="metric-label">Execution equity</div>'
+        f'<div class="metric-value">{escape(fmt_money(execution_paper.get("equity") if execution_paper.get("enabled") else None))}</div>'
+        '<div class="metric-sub">simulated fill account</div>'
+        '</article>'
+        '<article class="metric-card">'
+        '<div class="metric-label">Execution P&amp;L</div>'
+        f'<div class="metric-value {exec_cls}">{escape(fmt_signed_money(exec_net) if execution_paper.get("enabled") else "—")}</div>'
+        f'<div class="metric-sub">{escape(fmt_pct(execution_paper.get("net_pnl_pct")) if execution_paper.get("enabled") else "—")}</div>'
+        '</article>'
+        '<article class="metric-card">'
+        '<div class="metric-label">Cash balance</div>'
+        f'<div class="metric-value">{escape(fmt_money(execution_paper.get("cash") if execution_paper.get("enabled") else None))}</div>'
+        '<div class="metric-sub">after simulated fills/fees</div>'
+        '</article>'
+        '<article class="metric-card">'
+        '<div class="metric-label">Open positions</div>'
+        f'<div class="metric-value">{len(execution_paper.get("positions") or []) if execution_paper.get("enabled") else 0}</div>'
+        f'<div class="metric-sub">{len(execution_paper.get("ledger") or []) if execution_paper.get("enabled") else 0} ledger rows</div>'
+        '</article>'
+    )
+
     wf_results = processed.get("walk_forward", [])
     if wf_results:
         wf_rows = []
@@ -1042,9 +1164,12 @@ def dashboard():
         metric4_sub=metric4_sub,
         chart_labels=json.dumps(processed.get("labels", [])),
         chart_data=json.dumps(processed.get("equity", [])),
+        execution_chart_labels=json.dumps(processed.get("execution_labels", processed.get("labels", []))),
+        execution_chart_data=json.dumps(processed.get("execution_equity", [])),
         equity_note=equity_note,
         sleeve_bars_html="".join(sleeve_bars),
         positions_html=positions_html,
+        execution_metric_cards_html=execution_metric_cards_html,
         execution_paper_html=execution_paper_html,
         walk_forward_html=walk_forward_html,
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
