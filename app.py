@@ -659,6 +659,16 @@ PAGE_TEMPLATE = Template(
     </article>
   </section>
 
+  <section class="panel" aria-label="Execution paper account">
+    <div class="panel-header">
+      <div>
+        <h2 class="panel-title">Execution Paper Account</h2>
+        <p class="panel-note">Simulated exchange-style fills, fees, slippage, positions, and cash ledger. Still paper-only — no live orders.</p>
+      </div>
+    </div>
+    <div id="execution-paper-panel">$execution_paper_html</div>
+  </section>
+
   $walk_forward_html
 
   <footer class="footer">
@@ -864,6 +874,87 @@ def dashboard():
         empty_line = "No active paper positions right now." if is_live else "Paper runner not connected to this dashboard yet."
         positions_html = f'<div class="no-data"><div><strong>No live positions.</strong><br>{empty_line}</div></div>'
 
+    execution_paper = processed.get("execution_paper") or {}
+    if execution_paper.get("enabled"):
+        exec_net = execution_paper.get("net_pnl", 0)
+        exec_cls = "pos" if isinstance(exec_net, (int, float)) and exec_net >= 0 else "neg"
+        exec_summary = (
+            '<div class="metric-grid" style="margin-bottom:18px">'
+            '<article class="metric-card">'
+            '<div class="metric-label">Execution equity</div>'
+            f'<div class="metric-value">{escape(fmt_money(execution_paper.get("equity")))}</div>'
+            '<div class="metric-sub">simulated fill account</div>'
+            '</article>'
+            '<article class="metric-card">'
+            '<div class="metric-label">Execution P&amp;L</div>'
+            f'<div class="metric-value {exec_cls}">{escape(fmt_signed_money(exec_net))}</div>'
+            f'<div class="metric-sub">{escape(fmt_pct(execution_paper.get("net_pnl_pct")))}</div>'
+            '</article>'
+            '<article class="metric-card">'
+            '<div class="metric-label">Cash balance</div>'
+            f'<div class="metric-value">{escape(fmt_money(execution_paper.get("cash")))}</div>'
+            '<div class="metric-sub">after simulated fills/fees</div>'
+            '</article>'
+            '<article class="metric-card">'
+            '<div class="metric-label">Ledger rows</div>'
+            f'<div class="metric-value">{len(execution_paper.get("ledger") or [])}</div>'
+            f'<div class="metric-sub">{len(execution_paper.get("positions") or [])} open paper positions</div>'
+            '</article>'
+            '</div>'
+        )
+
+        exec_pos_rows = []
+        for p in (execution_paper.get("positions") or [])[:20]:
+            upnl = p.get("unrealized_pnl", 0)
+            cls = "pos" if isinstance(upnl, (int, float)) and upnl >= 0 else "neg"
+            exec_pos_rows.append(
+                "<tr>"
+                f"<td data-label='Symbol' class='config-cell'>{escape(str(p.get('symbol', '')))}</td>"
+                f"<td data-label='Side'>{escape(str(p.get('side', '')))}</td>"
+                f"<td data-label='Qty' class='num'>{escape(fmt_num(p.get('quantity'), 6))}</td>"
+                f"<td data-label='Entry' class='num'>{escape(fmt_num(p.get('avg_entry_price'), 6))}</td>"
+                f"<td data-label='Mark' class='num'>{escape(fmt_num(p.get('mark_price'), 6))}</td>"
+                f"<td data-label='Notional' class='num'>{escape(fmt_money(p.get('notional')))}</td>"
+                f"<td data-label='UPnL' class='num {cls}'>{escape(fmt_signed_money(upnl))}</td>"
+                "</tr>"
+            )
+        exec_positions_table = (
+            '<div class="table-wrap"><table><thead><tr>'
+            '<th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Mark</th><th class="num">Notional</th><th class="num">UPnL</th>'
+            '</tr></thead><tbody>' + "".join(exec_pos_rows) + '</tbody></table></div>'
+            if exec_pos_rows
+            else '<div class="no-data"><div><strong>No simulated execution positions.</strong></div></div>'
+        )
+
+        exec_fill_rows = []
+        for f in (execution_paper.get("ledger") or [])[-20:]:
+            exec_fill_rows.append(
+                "<tr>"
+                f"<td data-label='Symbol' class='config-cell'>{escape(str(f.get('symbol', '')))}</td>"
+                f"<td data-label='Side'>{escape(str(f.get('side', '')))}</td>"
+                f"<td data-label='Qty' class='num'>{escape(fmt_num(f.get('quantity'), 6))}</td>"
+                f"<td data-label='Fill' class='num'>{escape(fmt_num(f.get('fill_price'), 6))}</td>"
+                f"<td data-label='Notional' class='num'>{escape(fmt_money(f.get('notional')))}</td>"
+                f"<td data-label='Fee' class='num'>{escape(fmt_money(f.get('fee')))}</td>"
+                f"<td data-label='Reason'>{escape(str(f.get('reason', '')))}</td>"
+                "</tr>"
+            )
+        exec_ledger_table = (
+            '<h3 class="panel-title" style="font-size:1rem;margin-top:20px">Recent simulated fills</h3>'
+            '<div class="table-wrap"><table><thead><tr>'
+            '<th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Fill</th><th class="num">Notional</th><th class="num">Fee</th><th>Reason</th>'
+            '</tr></thead><tbody>' + "".join(exec_fill_rows) + '</tbody></table></div>'
+            if exec_fill_rows
+            else ""
+        )
+        limitations = execution_paper.get("limitations") or []
+        limit_html = "".join(f"<li>{escape(str(item))}</li>" for item in limitations[:4])
+        execution_paper_html = exec_summary + exec_positions_table + exec_ledger_table
+        if limit_html:
+            execution_paper_html += f'<div class="panel-note" style="margin-top:14px"><strong>Limitations:</strong><ul>{limit_html}</ul></div>'
+    else:
+        execution_paper_html = '<div class="no-data"><div><strong>Execution paper not enabled yet.</strong><br>The API is live, but no execution-paper account payload is available.</div></div>'
+
     wf_results = processed.get("walk_forward", [])
     if wf_results:
         wf_rows = []
@@ -954,6 +1045,7 @@ def dashboard():
         equity_note=equity_note,
         sleeve_bars_html="".join(sleeve_bars),
         positions_html=positions_html,
+        execution_paper_html=execution_paper_html,
         walk_forward_html=walk_forward_html,
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     )

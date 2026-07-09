@@ -84,4 +84,12 @@ with tempfile.TemporaryDirectory() as tmp:
     assert body["execution_paper"]["enabled"] is True
     assert body["execution_paper"]["ledger"][-1]["side"] == "BUY"
 
+    page = client.get("/")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert "Execution Paper Account" in html
+    assert "Execution equity" in html
+    assert "BTCUSDT" in html
+    assert "Recent simulated fills" in html
+
 print("raw runner execution payload check passed")
