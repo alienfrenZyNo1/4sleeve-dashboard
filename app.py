@@ -132,6 +132,7 @@ def process_live_data(paper):
         "max_dd": max_dd_frac,
         "sleeve_pnl": sleeve_pnl,
         "positions": paper.get("positions", []),
+        "execution_paper": paper.get("execution_paper", {"enabled": False}),
         "ann_return": paper.get("ann_return"),
         "sharpe": paper.get("sharpe"),
         "walk_forward": [],

@@ -32,6 +32,18 @@ payload = {
     ],
     "paper_status": "RUNNING",
     "last_updated": "2026-07-09T11:16:25Z",
+    "execution_paper": {
+        "enabled": True,
+        "equity": 1998.75,
+        "net_pnl": -1.25,
+        "positions": [
+            {"symbol": "BTCUSDT", "side": "LONG", "quantity": 0.002, "notional": 220.0}
+        ],
+        "ledger": [
+            {"symbol": "BTCUSDT", "side": "BUY", "quantity": 0.002, "fill_price": 110000.0}
+        ],
+        "limitations": ["test limitation"],
+    },
 }
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -51,6 +63,8 @@ with tempfile.TemporaryDirectory() as tmp:
     processed = module.process_live_data(data)
     assert processed["current_equity"] == 2002.09
     assert processed["positions"][0]["symbol"] == "4-SLEEVE"
+    assert processed["execution_paper"]["enabled"] is True
+    assert processed["execution_paper"]["positions"][0]["symbol"] == "BTCUSDT"
 
     client = module.app.test_client()
     response = client.get("/api/data")
@@ -59,5 +73,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert body["is_live"] is True
     assert body["source"] == "LIVE PAPER RUNNER"
     assert body["current_equity"] == 2002.09
+    assert body["execution_paper"]["enabled"] is True
+    assert body["execution_paper"]["ledger"][-1]["side"] == "BUY"
 
 print("mirrored live payload check passed")
