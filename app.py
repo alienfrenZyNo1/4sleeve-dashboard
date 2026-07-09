@@ -852,6 +852,22 @@ function renderExecutionFills(executionPaper) {
     {key:'fee', label:'Fee', num:true}, {key:'reason', label:'Reason'},
   ], rows, 'No simulated fills yet.');
 }
+function updateExecutionMetrics(executionPaper) {
+  const ep = executionPaper || {};
+  const pnl = Number(ep.net_pnl || 0);
+  setText('execution-metric-equity', fmtMoney(ep.equity));
+  setText('execution-metric-equity-sub', 'simulated fill account');
+  const pnlEl = document.getElementById('execution-metric-pnl');
+  if (pnlEl) {
+    pnlEl.textContent = fmtSignedMoney(pnl);
+    pnlEl.classList.toggle('pos', pnl >= 0);
+    pnlEl.classList.toggle('neg', pnl < 0);
+  }
+  setText('execution-metric-pnl-sub', fmtPct(ep.net_pnl_pct));
+  setText('execution-metric-cash', fmtMoney(ep.cash));
+  setText('execution-metric-positions', String((ep.positions || []).length));
+  setText('execution-metric-positions-sub', String((ep.ledger || []).length) + ' ledger rows');
+}
 
 function makeEquityChart(canvasId, labels, data, color, fill) {
   const canvas = document.getElementById(canvasId);
@@ -936,6 +952,7 @@ function applyLiveData(data) {
   }
 
   const ep = data.execution_paper || {};
+  updateExecutionMetrics(ep);
   renderModelTrades(data);
   renderExecutionPositions(ep);
   renderExecutionFills(ep);
@@ -1133,23 +1150,23 @@ def dashboard():
     execution_metric_cards_html = (
         '<article class="metric-card">'
         '<div class="metric-label">Execution equity</div>'
-        f'<div class="metric-value">{escape(fmt_money(execution_paper.get("equity") if execution_paper.get("enabled") else None))}</div>'
-        '<div class="metric-sub">simulated fill account</div>'
+        f'<div id="execution-metric-equity" class="metric-value">{escape(fmt_money(execution_paper.get("equity") if execution_paper.get("enabled") else None))}</div>'
+        '<div id="execution-metric-equity-sub" class="metric-sub">simulated fill account</div>'
         '</article>'
         '<article class="metric-card">'
         '<div class="metric-label">Execution P&amp;L</div>'
-        f'<div class="metric-value {exec_cls}">{escape(fmt_signed_money(exec_net) if execution_paper.get("enabled") else "—")}</div>'
-        f'<div class="metric-sub">{escape(fmt_pct(execution_paper.get("net_pnl_pct")) if execution_paper.get("enabled") else "—")}</div>'
+        f'<div id="execution-metric-pnl" class="metric-value {exec_cls}">{escape(fmt_signed_money(exec_net) if execution_paper.get("enabled") else "—")}</div>'
+        f'<div id="execution-metric-pnl-sub" class="metric-sub">{escape(fmt_pct(execution_paper.get("net_pnl_pct")) if execution_paper.get("enabled") else "—")}</div>'
         '</article>'
         '<article class="metric-card">'
         '<div class="metric-label">Cash balance</div>'
-        f'<div class="metric-value">{escape(fmt_money(execution_paper.get("cash") if execution_paper.get("enabled") else None))}</div>'
+        f'<div id="execution-metric-cash" class="metric-value">{escape(fmt_money(execution_paper.get("cash") if execution_paper.get("enabled") else None))}</div>'
         '<div class="metric-sub">after simulated fills/fees</div>'
         '</article>'
         '<article class="metric-card">'
         '<div class="metric-label">Open positions</div>'
-        f'<div class="metric-value">{len(execution_paper.get("positions") or []) if execution_paper.get("enabled") else 0}</div>'
-        f'<div class="metric-sub">{len(execution_paper.get("ledger") or []) if execution_paper.get("enabled") else 0} ledger rows</div>'
+        f'<div id="execution-metric-positions" class="metric-value">{len(execution_paper.get("positions") or []) if execution_paper.get("enabled") else 0}</div>'
+        f'<div id="execution-metric-positions-sub" class="metric-sub">{len(execution_paper.get("ledger") or []) if execution_paper.get("enabled") else 0} ledger rows</div>'
         '</article>'
     )
 

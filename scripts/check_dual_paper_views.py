@@ -94,8 +94,11 @@ with tempfile.TemporaryDirectory() as tmp:
     assert "function renderModelTrades" in html
     assert "function renderExecutionPositions" in html
     assert "function renderExecutionFills" in html
+    assert "function updateExecutionMetrics" in html
     assert "positions-panel').innerHTML" in html
     assert "execution-positions-panel').innerHTML" in html
     assert "execution-fills-panel').innerHTML" in html
+    assert "execution-metric-equity" in html
+    assert "execution-metric-pnl" in html
 
 print("dual paper view check passed")
