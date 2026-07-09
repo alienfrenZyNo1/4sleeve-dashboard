@@ -19,6 +19,7 @@ app = Flask(__name__)
 # Data paths
 # ---------------------------------------------------------------------------
 PAPER_RUNNER_PATH = Path(os.environ.get("PAPER_RUNNER_PATH", "/data/paper-runner/daily_pnl.json"))
+MIRRORED_API_PATH = Path(os.environ.get("MIRRORED_API_PATH", "/data/paper-runner/live_api_data.json"))
 BACKTEST_FALLBACK = Path(__file__).parent / "data" / "SD007-4sleeve-dd-optimization-data.json"
 
 DD_GREEN = 0.10
@@ -45,6 +46,9 @@ def get_data_source():
     paper = load_json_safe(PAPER_RUNNER_PATH)
     if paper and "daily_pnl" in paper:
         return paper, "LIVE PAPER RUNNER", True
+    mirrored_api = load_json_safe(MIRRORED_API_PATH)
+    if mirrored_api and mirrored_api.get("is_live") and "equity" in mirrored_api:
+        return mirrored_api, mirrored_api.get("source") or "LIVE PAPER MIRROR", True
     backtest = load_json_safe(BACKTEST_FALLBACK)
     if backtest:
         return backtest, "BACKTEST FALLBACK", False
@@ -71,6 +75,23 @@ def generate_backtest_equity(total_ret, n_days):
 
 
 def process_live_data(paper):
+    if "daily_pnl" not in paper and "equity" in paper:
+        mirrored = dict(paper)
+        mirrored.setdefault("labels", [f"Point {i}" for i, _ in enumerate(mirrored.get("equity", []))])
+        mirrored.setdefault("initial_capital", 2000.0)
+        equity = mirrored.get("equity", [])
+        mirrored.setdefault("current_equity", equity[-1] if equity else mirrored["initial_capital"])
+        mirrored.setdefault("peak_equity", max([mirrored["initial_capital"], *equity]))
+        mirrored.setdefault("net_pnl", mirrored["current_equity"] - mirrored["initial_capital"])
+        mirrored.setdefault("net_pnl_pct", (mirrored["current_equity"] / mirrored["initial_capital"] - 1) if mirrored["initial_capital"] else 0)
+        mirrored.setdefault("current_dd", 0)
+        mirrored.setdefault("max_dd", 0)
+        mirrored.setdefault("sleeve_pnl", {s: 0 for s in SLEEVE_NAMES})
+        mirrored.setdefault("positions", [])
+        mirrored.setdefault("walk_forward", [])
+        mirrored.setdefault("paper_status", "RUNNING")
+        return mirrored
+
     daily = paper.get("daily_pnl", [])
     labels = [d.get("date", f"Point {i}") for i, d in enumerate(daily)]
     equity_values = [d.get("equity", 0) for d in daily]
