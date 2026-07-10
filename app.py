@@ -864,7 +864,8 @@ function updateExecutionMetrics(executionPaper) {
     pnlEl.classList.toggle('neg', pnl < 0);
   }
   setText('execution-metric-pnl-sub', fmtPct(ep.net_pnl_pct));
-  setText('execution-metric-cash', fmtMoney(ep.cash));
+  setText('execution-metric-cash', fmtMoney(ep.available_cash ?? ep.cash));
+  setText('execution-metric-cash-sub', fmtMoney(ep.short_collateral) + ' reserved for shorts');
   setText('execution-metric-positions', String((ep.positions || []).length));
   setText('execution-metric-positions-sub', String((ep.ledger || []).length) + ' ledger rows');
 }
@@ -1081,9 +1082,9 @@ def dashboard():
             f'<div class="metric-sub">{escape(fmt_pct(execution_paper.get("net_pnl_pct")))}</div>'
             '</article>'
             '<article class="metric-card">'
-            '<div class="metric-label">Cash balance</div>'
-            f'<div class="metric-value">{escape(fmt_money(execution_paper.get("cash")))}</div>'
-            '<div class="metric-sub">after simulated fills/fees</div>'
+            '<div class="metric-label">Available cash</div>'
+            f'<div class="metric-value">{escape(fmt_money(execution_paper.get("available_cash", execution_paper.get("cash"))))}</div>'
+            f'<div class="metric-sub">{escape(fmt_money(execution_paper.get("short_collateral")))} reserved for shorts</div>'
             '</article>'
             '<article class="metric-card">'
             '<div class="metric-label">Ledger rows</div>'
@@ -1159,9 +1160,9 @@ def dashboard():
         f'<div id="execution-metric-pnl-sub" class="metric-sub">{escape(fmt_pct(execution_paper.get("net_pnl_pct")) if execution_paper.get("enabled") else "—")}</div>'
         '</article>'
         '<article class="metric-card">'
-        '<div class="metric-label">Cash balance</div>'
-        f'<div id="execution-metric-cash" class="metric-value">{escape(fmt_money(execution_paper.get("cash") if execution_paper.get("enabled") else None))}</div>'
-        '<div class="metric-sub">after simulated fills/fees</div>'
+        '<div class="metric-label">Available cash</div>'
+        f'<div id="execution-metric-cash" class="metric-value">{escape(fmt_money(execution_paper.get("available_cash", execution_paper.get("cash")) if execution_paper.get("enabled") else None))}</div>'
+        f'<div id="execution-metric-cash-sub" class="metric-sub">{escape(fmt_money(execution_paper.get("short_collateral")))} reserved for shorts</div>'
         '</article>'
         '<article class="metric-card">'
         '<div class="metric-label">Open positions</div>'
